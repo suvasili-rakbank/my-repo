@@ -1,0 +1,80 @@
+
+import ch.qos.logback.contrib.json.classic.JsonLayout;
+import lombok.extern.slf4j.Slf4j;
+
+import ch.qos.logback.classic.Logger;
+import ch.qos.logback.classic.spi.ILoggingEvent;
+import ch.qos.logback.classic.spi.LoggingEvent;
+import org.slf4j.LoggerFactory;
+
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
+import java.util.stream.IntStream;
+
+
+import java.util.ArrayList;
+import java.util.List;
+
+@Slf4j
+public class PatternMaskingLayout extends JsonLayout {
+
+    private final boolean isEnabled;
+
+    private final List<String> maskPatterns = new ArrayList<>();
+
+    private Pattern multilinePattern;
+
+    public PatternMaskingLayout(Boolean isEnable) {
+        this.isEnabled = isEnable;
+    }
+
+    public PatternMaskingLayout() {
+        log.info("Masking enabled: {}", Boolean.parseBoolean(System.getenv("LOGGER_MASKING_FLAG")));
+        isEnabled = true;//Boolean.parseBoolean(System.getenv("LOGGER_MASKING_FLAG"));
+    }
+
+    public void addMaskPattern(String maskPattern) {
+        if (isEnabled) {
+            maskPatterns.add(maskPattern);
+            multilinePattern = Pattern.compile(
+                    String.join("|", maskPatterns),
+                    Pattern.MULTILINE
+            );
+        }
+    }
+
+    @Override
+    public String doLayout(ILoggingEvent event) {
+        log.info("Masking enabled: {}", isEnabled);
+
+        Logger logger = (Logger) LoggerFactory.getLogger(event.getLoggerName());
+
+        ILoggingEvent maskedEvent = new LoggingEvent(
+                event.getLoggerName(),
+                logger,
+                event.getLevel(),
+                maskMessage(event.getFormattedMessage()),
+                event.getThrowableProxy() != null ? new Throwable(event.getThrowableProxy().getMessage()) : null,
+                event.getArgumentArray()
+        );
+        return super.doLayout(maskedEvent);
+    }
+
+    private String maskMessage(String message) {
+        if (multilinePattern == null) {
+            return message;
+        }
+        StringBuilder sb = new StringBuilder(message);
+        Matcher matcher = multilinePattern.matcher(sb);
+
+        while (matcher.find()) {
+            IntStream.rangeClosed(1, matcher.groupCount()).forEach(group -> {
+                if (matcher.group(group) != null) {
+                    IntStream.range(matcher.start(group), matcher.end(group))
+                            .forEach(i -> sb.setCharAt(i, '*'));
+                }
+            });
+        }
+        return sb.toString();
+    }
+}
